@@ -1,3 +1,7 @@
+"""
+This module contains functions and classes that handle and manipulate datasets.
+"""
+
 from pathlib import Path
 
 import dill
@@ -6,6 +10,10 @@ from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.trainers import BpeTrainer
+
+from logger import logger_factory
+
+logger = logger_factory()
 
 
 def split_dataset(dataset_dict, test_size=0.05, dev_size=0.05, seed=42):
@@ -69,7 +77,8 @@ def tokenizer_batch_iterator(batch_size=2048):
 
 
 if __name__ == "__main__":
-    print("Executing dataset functions")
+    logger.info("Executing dataset functions")
+    exit()
     ds = load_dataset("wikimedia/wikipedia", "20231101.en")
 
     print("Creating and training tokenizer...")
