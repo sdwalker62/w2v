@@ -78,25 +78,33 @@ def tokenizer_batch_iterator(batch_size=2048):
 
 if __name__ == "__main__":
     logger.info("Executing dataset functions")
-    exit()
     ds = load_dataset("wikimedia/wikipedia", "20231101.en")
 
-    print("Creating and training tokenizer...")
+    logger.info("Creating and training tokenizer...")
     tokenizer = Tokenizer(BPE(unk_token="[UNK]"))
     tokenizer.pre_tokenizer = Whitespace()
-    trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"])
+    trainer = BpeTrainer(
+        special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"],
+    )
     tokenizer.train_from_iterator(
         tokenizer_batch_iterator(), trainer=trainer, length=len(ds["train"])
     )
+
+    test_string = "This is a good tokenizer for processing words!"
+    e = tokenizer.encode(test_string)
+    print(e.tokens)
+    logger.info("Saving tokenizer...")
+    tokenizer.save("models/tokenizer/bpe_tokenizer.json")
+
     with open("./tokenizer.pkl", "wb") as f:
         dill.dump(tokenizer, f)
 
-    print("Adding extra features to dataset...")
-    ds["train"] = ds["train"].map(batch_tokenization, batched=True)
+    logger.info("Adding extra features to dataset...")
+    ds["train"] = ds["train"].map(batch_tokenization, batched=True, num_proc=24)
 
-    print("Creating splits...")
+    logger.info("Creating splits...")
     ds = split_dataset(ds)
 
-    print("Saving data...")
+    logger.info("Saving data...")
     data_path = Path("./data").absolute()
     ds.save_to_disk(str(data_path))
