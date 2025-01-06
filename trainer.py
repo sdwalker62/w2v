@@ -5,7 +5,7 @@ from logger import logger_factory
 from datasets import Dataset, DatasetDict, IterableDataset, IterableDatasetDict
 from typing import TypeAlias
 from dataclasses import dataclass
-from torch import Module
+from torch.nn import Module
 
 dataset: TypeAlias = Dataset | DatasetDict | IterableDataset | IterableDatasetDict
 
