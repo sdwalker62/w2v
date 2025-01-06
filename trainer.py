@@ -2,19 +2,35 @@
 
 from logger import logger_factory
 
-from datasets import DatasetDict
+from datasets import Dataset, DatasetDict, IterableDataset, IterableDatasetDict
+from typing import TypeAlias
+from dataclasses import dataclass
+from torch import Module
+
+dataset: TypeAlias = Dataset | DatasetDict | IterableDataset | IterableDatasetDict
+
+
+@dataclass(frozen=True)
+class HyperParams:
+    n_epochs: int = 1
+    lr: float = 1e-1
+    optimizer: str = "adam"
+    loss_fn: str = "ce"
 
 
 class Trainer:
-    def __init__(self, dd: DatasetDict) -> None:
-        self.n_epochs = 1
-        self.model = None
+    def __init__(self, dd: dataset, model: Module, hparams: HyperParams) -> None:
+        self.model = model
         self.chkpt_iter = 5  # Number of training passes between each checkpoint (includes validation passes)
-        self.hyperparams = dict()
+        self.hyperparams = hparams
         self.dd = dd
-        self.td = dd["training"]
-        self.vd = dd["validation"]
-        self.testd = dd["test"]
+        if isinstance(self.dd, DatasetDict) or isinstance(self.dd, IterableDatasetDict):
+            self.td = self.dd["train"]
+            self.vd = self.dd["validation"]
+            self.testd = self.dd["test"]
+
+        if isinstance(dd, IterableDatasetDict) or isinstance(dd, IterableDataset):
+            self.streaming = True
         self.log = logger_factory()
 
     def pre_check(self):
