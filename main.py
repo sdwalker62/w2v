@@ -2,16 +2,13 @@ from trainer import Trainer, HyperParams
 from datasets import DatasetDict, load_dataset
 from logger import logger_factory
 from model import Word2VecModel
-import shutil
-
-
-terminal_width = shutil.get_terminal_size().columns
+from utility_fns import horizontal_rule
 
 
 if __name__ == "__main__":
     logger = logger_factory()
     logger.info("W2V")
-    logger.info(terminal_width * "=")
+    horizontal_rule()
 
     hparams = HyperParams()
     vocab_size = 10_000
