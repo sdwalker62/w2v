@@ -14,10 +14,10 @@ if __name__ == "__main__":
     vocab_size = 10_000
     embedding_dim = 64
     is_skipgram = True
-    hparams.hypertable()
     model = Word2VecModel(vocab_size, embedding_dim, is_skipgram)
 
     dd = load_dataset("sigil-ml/PreTokenizedWikiEn", streaming=True)
     trainer = Trainer(dd, model, hparams)
-    
+    trainer.display_config_table()
+
     trainer.pre_check()
