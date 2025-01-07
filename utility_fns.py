@@ -4,5 +4,6 @@ import shutil
 
 terminal_width = shutil.get_terminal_size().columns
 
+
 def horizontal_rule():
-    print(terminal_width * "=")    
+    print(terminal_width * "=")
