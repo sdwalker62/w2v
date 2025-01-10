@@ -19,6 +19,14 @@ from model import Word2VecModel
 
 dataset: TypeAlias = Dataset | DatasetDict | IterableDataset | IterableDatasetDict
 
+# TODO: Add wandb integration
+# TODO: Add graphs to checkpoint dir
+# TODO: Finish skipgram
+# TODO: Add function doc strings
+# TODO: Add load model
+# TODO: Auto determine best checkpoint from testing loss
+# TODO: Finish rich table
+
 
 class HyperParams:
     def __init__(
@@ -30,9 +38,9 @@ class HyperParams:
         embed_dim=128,
         is_skipgram=False,
         batch_size=16,
-        window_size=2,
-        iter_report=100,
-        chkpt_iter=100,
+        window_size=4,
+        iter_report=1_000,
+        chkpt_iter=100_000,
     ) -> None:
         self.n_epochs = n_epochs
         self.lr = lr
@@ -63,7 +71,9 @@ class Trainer:
         self.vocab_size = self.tokenizer.get_vocab_size()
         self.log.info(f"Vocab size: {self.vocab_size}")
         self.model = Word2VecModel(
-            self.vocab_size, self.hyperparams.embed_dim, self.hyperparams.is_skipgram
+            self.vocab_size,
+            self.hyperparams.embed_dim,
+            self.hyperparams.is_skipgram,
         ).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.hyperparams.lr)
         self.criterion = nn.CrossEntropyLoss()
@@ -72,8 +82,6 @@ class Trainer:
             self.td = self.dd["train"]
             self.vd = self.dd["validation"]
             self.testd = self.dd["test"]
-        if isinstance(dd, IterableDatasetDict) or isinstance(dd, IterableDataset):
-            self.streaming = True
         self.console = Console()
         self.chkpt_dir = chkpt_dir
         self.specific_chkpt_dir = None
@@ -82,30 +90,39 @@ class Trainer:
         self.training_losses = []
         self.validation_losses = []
         self.testing_loss = 0.0
-        self.debug_mode = True
+        self.debug_mode = False
         self.debug_iter = 10
-
         # init functions
         self.create_dirs()
 
     def pre_check(self) -> None:
         """Performs pre-training actions to ensure functionality."""
-        self.log.info(len(self.td))
-        self.log.info(len(self.vd))
-        self.log.info(len(self.testd))
+        self.log.info("Executing pre-checks")
+        # TODO: Finish this function!
+        # Set to debug mode
+        # delete the created pre-check directory
+        # set debug mode off
+        self.log.info("Pre-checks complete, artifacts removed")
 
     def dump_stats(self) -> None:
         """Dump training statistics to JSON"""
+        print("\n")
+        self.log.info("Gathering training statistics")
         training_stats = {
             "training_losses": self.training_losses,
             "validation_losses": self.validation_losses,
             "test_loss": self.testing_loss,
         }
+        self.log.info(
+            f"Saving training statistics at {str(self.specific_chkpt_dir)}/training_stats.json"
+        )
         with open(self.specific_chkpt_dir / "training_stats.json", "w") as f:
             json.dump(training_stats, f)
 
-    def start(self):
+    def start(self) -> None:
         """Training entrypoint."""
+        self.log.info("Training started")
+        self.pre_check()
         self.train_epoch()
 
     def debug_boundary(self, idx: int) -> None:
@@ -128,7 +145,7 @@ class Trainer:
         """
         print("\n")
         # Training loop
-        passed_samples = 0
+        training_passes = 0
         for epoch in range(self.hyperparams.n_epochs):
             print("\n")
             self.log.info(f"Running epoch: {epoch + 1}")
@@ -144,7 +161,7 @@ class Trainer:
                 batches = self.prepare_batches(example)  # list[tuple[list[int], int]]
                 for batch_idx, X in enumerate(batches):
                     X, y = self.split_to_tensors(X)
-                    passed_samples += self.hyperparams.batch_size
+                    training_passes += 1
                     # Forward pass
                     self.optimizer.zero_grad()
                     output = self.model(X)
@@ -165,10 +182,12 @@ class Trainer:
                         break
                 if self.debug_boundary(example_idx):
                     break
+                if (example_idx + 1) % self.hyperparams.chkpt_iter == 0:
+                    self.checkpoint(f"iter-{epoch + 1}_{example_idx + 1}")
 
             self.log.info(
                 f"Epoch {epoch + 1} completed, "
-                f"Average Loss: {total_loss / passed_samples:.4f}"
+                f"Average Loss: {total_loss / training_passes:.4f}"
             )
             self.checkpoint(f"epoch-{epoch}")
             self.validate()
