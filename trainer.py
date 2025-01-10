@@ -32,6 +32,7 @@ class HyperParams:
         batch_size=16,
         window_size=2,
         iter_report=100,
+        chkpt_iter=100,
     ) -> None:
         self.n_epochs = n_epochs
         self.lr = lr
@@ -42,6 +43,7 @@ class HyperParams:
         self.batch_size = batch_size
         self.window_size = window_size
         self.iter_report = iter_report
+        self.chkpt_iter = chkpt_iter
 
 
 class Trainer:
@@ -65,7 +67,6 @@ class Trainer:
         ).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.hyperparams.lr)
         self.criterion = nn.CrossEntropyLoss()
-        self.chkpt_iter = 5  # Number of training passes between each checkpoint (includes validation passes)
         self.dd = dd
         if isinstance(self.dd, DatasetDict) or isinstance(self.dd, IterableDatasetDict):
             self.td = self.dd["train"]
@@ -81,6 +82,8 @@ class Trainer:
         self.training_losses = []
         self.validation_losses = []
         self.testing_loss = 0.0
+        self.debug_mode = False
+        self.debug_iter = 10
 
         # init functions
         self.create_dirs()
@@ -104,6 +107,12 @@ class Trainer:
     def start(self):
         """Training entrypoint."""
         self.train_epoch()
+
+    def debug_boundary(self, idx: int) -> None:
+        """Stop iteration for debugging."""
+        if idx == self.debug_iter:
+            return True
+        return False
 
     def train_epoch(self) -> None:
         """
@@ -130,7 +139,7 @@ class Trainer:
             # `torch.data.DataLoader` so we will instead loop over the training
             # data, collate each item, and then batch the results.
             # Remote Data -> Get Row -> Collate -> Batch -> Train
-            for example in self.td:
+            for example_idx, example in enumerate(self.td):
                 """Each example is a dictionary with features such as ids, text, etc."""
                 batches = self.prepare_batches(example)  # list[tuple[list[int], int]]
                 for batch_idx, X in enumerate(batches):
@@ -152,8 +161,10 @@ class Trainer:
                             f"Epoch {epoch + 1}/{self.hyperparams.n_epochs}, "
                             f"Loss: {total_loss / (batch_idx + 1):.4f}"
                         )
+                    if self.debug_mode and self.debug_boundary(batch_idx):
+                        break
+                if self.debug_mode and self.debug_boundary(example_idx):
                     break
-                break
 
             self.log.info(
                 f"Epoch {epoch + 1} completed, "
@@ -173,16 +184,19 @@ class Trainer:
         running_loss = 0.0
         total_batches = 0
         with torch.no_grad():
-            for _, example in enumerate(self.vd):
+            for example_idx, example in enumerate(self.vd):
                 """Each example is a dictionary with features such as ids, text, etc."""
                 batches = self.prepare_batches(example)  # list[tuple[list[int], int]]
-                for _, X in enumerate(batches):
+                for batch_idx, X in enumerate(batches):
                     X, y = self.split_to_tensors(X)
                     output = self.model(X)
                     loss = self.criterion(output, y)
                     running_loss += loss
                     total_batches += 1
-                break
+                    if self.debug_mode and self.debug_boundary(batch_idx):
+                        break
+                if self.debug_mode and self.debug_boundary(example_idx):
+                    break
         avg_loss = running_loss / total_batches
         self.validation_losses.append(avg_loss.item())
 
@@ -195,16 +209,19 @@ class Trainer:
         running_loss = 0.0
         total_batches = 0
         with torch.no_grad():
-            for _, example in enumerate(self.testd):
+            for example_idx, example in enumerate(self.testd):
                 """Each example is a dictionary with features such as ids, text, etc."""
                 batches = self.prepare_batches(example)  # list[tuple[list[int], int]]
-                for _, X in enumerate(batches):
+                for batch_idx, X in enumerate(batches):
                     X, y = self.split_to_tensors(X)
                     output = self.model(X)
                     loss = self.criterion(output, y)
                     running_loss += loss
                     total_batches += 1
-                break
+                    if self.debug_mode and self.debug_boundary(batch_idx):
+                        break
+                if self.debug_mode and self.debug_boundary(example_idx):
+                    break
         avg_loss = running_loss / total_batches
         self.testing_loss = avg_loss.item()
 
