@@ -76,6 +76,7 @@ class Trainer:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.console = Console()
         self.chkpt_dir = chkpt_dir
+        self.specific_chkpt_dir = None
         self.current_time = datetime.now()
         self.chkpt_n = 0
 
@@ -202,11 +203,11 @@ class Trainer:
         else:
             dir_name = "cbow--"
         dir_name += self.current_time.strftime("%Y-%m-%d-%H-%M-%S")
-        specific_chkpt_dir = self.chkpt_dir / Path(dir_name)
-        if specific_chkpt_dir.absolute().exists():
-            specific_chkpt_dir.absolute().mkdir(exist_ok=False)
+        self.specific_chkpt_dir = self.chkpt_dir / Path(dir_name)
+        if not self.specific_chkpt_dir.absolute().exists():
+            self.specific_chkpt_dir.absolute().mkdir(exist_ok=False, parents=True)
 
-    def checkpoint(self):
+    def checkpoint(self, desc: str):
         """Perform checkpointing duties."""
         # Create unique directory within the checkpoint directory
         assert self.chkpt_dir.exists(), self.log.error(
@@ -215,23 +216,23 @@ class Trainer:
         self.chkpt_n += 1
         self.log.info(f"Performing checkpoint: {self.chkpt_n}")
 
-        self.save_model()
+        self.save_model(desc)
 
-    def save_model(self):
+    def save_model(self, desc: str):
         """Dumps the model to disk."""
-        if output_path:
-            output_path = Path(output_path)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(
-                {
-                    "model_state_dict": self.model.state_dict(),
-                    "vocab": dataset.vocab,
-                    "embedding_dim": self.embedding_dim,
-                    "is_skip_gram": self.is_skip_gram,
-                },
-                output_path,
-            )
-            self.log.info(f"Model saved to {output_path}")
+        output_name = self.chkpt_n + "-" + desc
+        output_path = self.specific_chkpt_dir / Path(output_name)
+        output_path.parent.mkdir(exist_ok=False)
+        torch.save(
+            {
+                "model_state_dict": self.model.state_dict(),
+                "vocab": dataset.vocab,
+                "embedding_dim": self.embedding_dim,
+                "is_skip_gram": self.is_skip_gram,
+            },
+            output_path,
+        )
+        self.log.info(f"Model saved to {output_path}")
 
     def load_model(
         self, path: str, device: str = "cuda" if torch.cuda.is_available() else "cpu"
