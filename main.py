@@ -28,7 +28,7 @@ if __name__ == "__main__":
 
     chkpt_dir = Path("./checkpoints")
     trainer = Trainer(dd, model, hparams, tokenizer, logger, chkpt_dir)
-    trainer.train_epoch()
+    trainer.start()
     # trainer.display_config_table()
 
     # trainer.pre_check()

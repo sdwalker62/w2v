@@ -31,6 +31,7 @@ class HyperParams:
         is_skipgram=False,
         batch_size=16,
         window_size=2,
+        iter_report=100,
     ) -> None:
         self.n_epochs = n_epochs
         self.lr = lr
@@ -40,6 +41,7 @@ class HyperParams:
         self.is_skipgram = is_skipgram
         self.batch_size = batch_size
         self.window_size = window_size
+        self.iter_report = iter_report
 
 
 class Trainer:
@@ -73,6 +75,7 @@ class Trainer:
         self.current_time = datetime.now()
         self.chkpt_n = 0
 
+        # init functions
         self.create_dirs()
 
     def pre_check(self) -> None:
@@ -83,11 +86,9 @@ class Trainer:
 
     def start(self):
         """Training entrypoint."""
+        self.train_epoch()
 
-    def train_epoch(
-        self,
-        output_path: str | None = None,
-    ) -> tuple[Word2VecModel, dict[str, torch.Tensor]]:
+    def train_epoch(self) -> tuple[Word2VecModel, dict[str, torch.Tensor]]:
         """
         Train Word2Vec model
 
@@ -115,7 +116,7 @@ class Trainer:
         passed_samples = 0
         model.train()
         for epoch in range(self.hyperparams.n_epochs):
-            self.log.info(f"Running epoch: {epoch}")
+            self.log.info(f"Running epoch: {epoch + 1}")
             total_loss = 0
 
             # The collation function runs after the batching process if we use
@@ -139,11 +140,13 @@ class Trainer:
 
                     total_loss += loss.item()
 
-                    if (batch_idx + 1) % 100 == 0:
+                    if (batch_idx + 1) % self.hyperparams.iter_report == 0:
                         self.log.info(
                             f"Epoch {epoch + 1}/{self.hyperparams.n_epochs}, "
                             f"Loss: {total_loss / (batch_idx + 1):.4f}"
                         )
+                    break
+                break
 
             self.log.info(
                 f"Epoch {epoch + 1} completed, "
@@ -153,12 +156,12 @@ class Trainer:
             self.validate()
 
         # Create word embeddings dictionary
-        embeddings = {
-            word: model.embedding.weight.data[idx].cpu()
-            for word, idx in dataset.vocab.items()
-        }
+        # embeddings = {
+        #     word: model.embedding.weight.data[idx].cpu()
+        #     for word, idx in dataset.vocab.items()
+        # }
 
-        return model, embeddings
+        return model
 
     def validate(self):
         """Completes a single pass over the validation set."""
@@ -193,15 +196,15 @@ class Trainer:
 
     def save_model(self, desc: str) -> None:
         """Dumps the model to disk."""
-        output_name = self.chkpt_n + "-" + desc
+        output_name = str(self.chkpt_n) + "-" + desc + ".pt"
         output_path = self.specific_chkpt_dir / Path(output_name)
-        output_path.parent.mkdir(exist_ok=False)
+        # output_path.mkdir(exist_ok=False)
         torch.save(
             {
                 "model_state_dict": self.model.state_dict(),
-                "vocab": dataset.vocab,
-                "embedding_dim": self.embedding_dim,
-                "is_skip_gram": self.is_skip_gram,
+                "tokenizer": self.tokenizer,
+                "embedding_dim": self.hyperparams.embed_dim,
+                "is_skip_gram": self.hyperparams.is_skipgram,
             },
             output_path,
         )
