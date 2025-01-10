@@ -82,7 +82,7 @@ class Trainer:
         self.training_losses = []
         self.validation_losses = []
         self.testing_loss = 0.0
-        self.debug_mode = False
+        self.debug_mode = True
         self.debug_iter = 10
 
         # init functions
@@ -110,7 +110,7 @@ class Trainer:
 
     def debug_boundary(self, idx: int) -> None:
         """Stop iteration for debugging."""
-        if idx == self.debug_iter:
+        if self.debug_mode and idx == self.debug_iter:
             return True
         return False
 
@@ -161,9 +161,9 @@ class Trainer:
                             f"Epoch {epoch + 1}/{self.hyperparams.n_epochs}, "
                             f"Loss: {total_loss / (batch_idx + 1):.4f}"
                         )
-                    if self.debug_mode and self.debug_boundary(batch_idx):
+                    if self.debug_boundary(batch_idx):
                         break
-                if self.debug_mode and self.debug_boundary(example_idx):
+                if self.debug_boundary(example_idx):
                     break
 
             self.log.info(
@@ -193,9 +193,9 @@ class Trainer:
                     loss = self.criterion(output, y)
                     running_loss += loss
                     total_batches += 1
-                    if self.debug_mode and self.debug_boundary(batch_idx):
+                    if self.debug_boundary(batch_idx):
                         break
-                if self.debug_mode and self.debug_boundary(example_idx):
+                if self.debug_boundary(example_idx):
                     break
         avg_loss = running_loss / total_batches
         self.validation_losses.append(avg_loss.item())
@@ -218,9 +218,9 @@ class Trainer:
                     loss = self.criterion(output, y)
                     running_loss += loss
                     total_batches += 1
-                    if self.debug_mode and self.debug_boundary(batch_idx):
+                    if self.debug_boundary(batch_idx):
                         break
-                if self.debug_mode and self.debug_boundary(example_idx):
+                if self.debug_boundary(example_idx):
                     break
         avg_loss = running_loss / total_batches
         self.testing_loss = avg_loss.item()
