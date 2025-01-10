@@ -1,6 +1,7 @@
 """Main training logic. Does not concern itself with data manipulation."""
 
 import json
+import re
 from datetime import datetime
 from logging import Logger
 from pathlib import Path
@@ -22,7 +23,6 @@ dataset: TypeAlias = Dataset | DatasetDict | IterableDataset | IterableDatasetDi
 # TODO: Add wandb integration
 # TODO: Add graphs to checkpoint dir
 # TODO: Finish skipgram
-# TODO: Add function doc strings
 # TODO: Add load model
 # TODO: Auto determine best checkpoint from testing loss
 # TODO: Finish rich table
@@ -90,10 +90,15 @@ class Trainer:
         self.training_losses = []
         self.validation_losses = []
         self.testing_loss = 0.0
-        self.debug_mode = False
+        self.phrases_txt, self.phrases_list = None, None
+        self.words_txt, self.words_list = None, None
+        self.debug_mode = True
         self.debug_iter = 10
         # init functions
         self.create_dirs()
+        self.load_analogies()
+        self.clean_analogies()
+        self.transform_analogies()
 
     def pre_check(self) -> None:
         """Performs pre-training actions to ensure functionality."""
@@ -398,6 +403,48 @@ class Trainer:
         values_tensor = torch.tensor(values)
 
         return lists_tensor.to(self.device), values_tensor.to(self.device)
+
+    def load_analogies(self) -> None:
+        """Loads the analogy data for testing phase 2."""
+        phrases_path = Path("./testing_data/question-phrases.txt").absolute()
+        words_path = Path("./testing_data/question-words.txt").absolute()
+
+        assert phrases_path.exists(), self.log.error(
+            f"Cannot find phrases file at {str(phrases_path.absolute())}"
+        )
+        assert words_path.exists(), self.log.error(
+            f"Cannot find words file at {str(words_path.absolute())}"
+        )
+
+        with open(phrases_path, "r") as f:
+            self.phrases_txt = f.readlines()
+
+        with open(words_path, "r") as f:
+            self.words_txt = f.readlines()
+
+    def clean_analogies(self) -> None:
+        """Removes headers and `\n` characters from the lists."""
+        header_pattern = r"^: .+"
+        clean_header_matches_phrases = [
+            s for s in self.phrases_txt if not re.match(header_pattern, s)
+        ]
+        clean_header_matches_phrases = [
+            s.replace("\n", "") for s in clean_header_matches_phrases
+        ]
+        clean_header_matches_words = [
+            s for s in self.words_txt if not re.match(header_pattern, s)
+        ]
+        clean_header_matches_words = [
+            s.replace("\n", "") for s in clean_header_matches_words
+        ]
+
+        self.phrases_txt = clean_header_matches_phrases
+        self.words_txt = clean_header_matches_words
+
+    def transform_analogies(self) -> None:
+        """Transform the analogy list to a form useful for processing."""
+        self.phrases_list = [(*s.split(" "),) for s in self.phrases_txt]
+        self.words_list = [(*s.split(" "),) for s in self.words_txt]
 
     def display_config_table(self) -> None:
         """Display a nicely formatted table of the hyperparameters."""
