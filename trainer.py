@@ -1,5 +1,6 @@
 """Main training logic. Does not concern itself with data manipulation."""
 
+import json
 from datetime import datetime
 from logging import Logger
 from pathlib import Path
@@ -13,7 +14,6 @@ from rich.table import Table
 from tokenizers import Tokenizer
 from torch import nn, optim
 from torch.nn import Module
-from torch.utils.data import DataLoader
 
 from model import Word2VecModel
 
@@ -54,26 +54,33 @@ class Trainer:
         logger: Logger,
         chkpt_dir: Path,
     ) -> None:
-        self.model = model
-        if tokenizer:
-            self.tokenizer = tokenizer
-        self.chkpt_iter = 5  # Number of training passes between each checkpoint (includes validation passes)
+        self.log = logger
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.hyperparams = hparams
+        self.tokenizer = tokenizer
+        self.vocab_size = self.tokenizer.get_vocab_size()
+        self.log.info(f"Vocab size: {self.vocab_size}")
+        self.model = Word2VecModel(
+            self.vocab_size, self.hyperparams.embed_dim, self.hyperparams.is_skipgram
+        ).to(self.device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.hyperparams.lr)
+        self.criterion = nn.CrossEntropyLoss()
+        self.chkpt_iter = 5  # Number of training passes between each checkpoint (includes validation passes)
         self.dd = dd
         if isinstance(self.dd, DatasetDict) or isinstance(self.dd, IterableDatasetDict):
             self.td = self.dd["train"]
             self.vd = self.dd["validation"]
             self.testd = self.dd["test"]
-
         if isinstance(dd, IterableDatasetDict) or isinstance(dd, IterableDataset):
             self.streaming = True
-        self.log = logger
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.console = Console()
         self.chkpt_dir = chkpt_dir
         self.specific_chkpt_dir = None
         self.current_time = datetime.now()
         self.chkpt_n = 0
+        self.training_losses = []
+        self.validation_losses = []
+        self.testing_loss = 0.0
 
         # init functions
         self.create_dirs()
@@ -84,11 +91,21 @@ class Trainer:
         self.log.info(len(self.vd))
         self.log.info(len(self.testd))
 
+    def dump_stats(self) -> None:
+        """Dump training statistics to JSON"""
+        training_stats = {
+            "training_losses": self.training_losses,
+            "validation_losses": self.validation_losses,
+            "test_loss": self.testing_loss,
+        }
+        with open(self.specific_chkpt_dir / "training_stats.json", "w") as f:
+            json.dump(training_stats, f)
+
     def start(self):
         """Training entrypoint."""
         self.train_epoch()
 
-    def train_epoch(self) -> tuple[Word2VecModel, dict[str, torch.Tensor]]:
+    def train_epoch(self) -> None:
         """
         Train Word2Vec model
 
@@ -100,23 +117,13 @@ class Trainer:
         Returns:
             Trained model and word embeddings dictionary
         """
-
-        # Initialize model
-        vocab_size = self.tokenizer.get_vocab_size()
-        self.log.info(f"Vocab size: {vocab_size}")
-        model = Word2VecModel(
-            vocab_size, self.hyperparams.embed_dim, self.hyperparams.is_skipgram
-        ).to(self.device)
-
-        # Initialize optimizer and loss
-        optimizer = optim.Adam(model.parameters(), lr=self.hyperparams.lr)
-        criterion = nn.CrossEntropyLoss()
-
+        print("\n")
         # Training loop
         passed_samples = 0
-        model.train()
         for epoch in range(self.hyperparams.n_epochs):
+            print("\n")
             self.log.info(f"Running epoch: {epoch + 1}")
+            self.model.train()
             total_loss = 0
 
             # The collation function runs after the batching process if we use
@@ -130,13 +137,13 @@ class Trainer:
                     X, y = self.split_to_tensors(X)
                     passed_samples += self.hyperparams.batch_size
                     # Forward pass
-                    optimizer.zero_grad()
-                    output = model(X)
-                    loss = criterion(output, y)
+                    self.optimizer.zero_grad()
+                    output = self.model(X)
+                    loss = self.criterion(output, y)
 
                     # Backward pass
                     loss.backward()
-                    optimizer.step()
+                    self.optimizer.step()
 
                     total_loss += loss.item()
 
@@ -154,22 +161,52 @@ class Trainer:
             )
             self.checkpoint(f"epoch-{epoch}")
             self.validate()
-
-        # Create word embeddings dictionary
-        # embeddings = {
-        #     word: model.embedding.weight.data[idx].cpu()
-        #     for word, idx in dataset.vocab.items()
-        # }
-
-        return model
+        self.test()
+        self.dump_stats()
 
     def validate(self):
         """Completes a single pass over the validation set."""
-        self.log.info("Running validation")
+        print("\n")
+        self.log.info("Validating")
+        self.log.info("Setting model to evaluation mode and entering no_grad context")
+        self.model.eval()
+        running_loss = 0.0
+        total_batches = 0
+        with torch.no_grad():
+            for _, example in enumerate(self.vd):
+                """Each example is a dictionary with features such as ids, text, etc."""
+                batches = self.prepare_batches(example)  # list[tuple[list[int], int]]
+                for _, X in enumerate(batches):
+                    X, y = self.split_to_tensors(X)
+                    output = self.model(X)
+                    loss = self.criterion(output, y)
+                    running_loss += loss
+                    total_batches += 1
+                break
+        avg_loss = running_loss / total_batches
+        self.validation_losses.append(avg_loss.item())
 
     def test(self):
         """Completes a single pass over the test set."""
-        self.log.info("Running tests")
+        print("\n")
+        self.log.info("Testing")
+        self.log.info("Setting model to evaluation mode and entering no_grad context")
+        self.model.eval()
+        running_loss = 0.0
+        total_batches = 0
+        with torch.no_grad():
+            for _, example in enumerate(self.testd):
+                """Each example is a dictionary with features such as ids, text, etc."""
+                batches = self.prepare_batches(example)  # list[tuple[list[int], int]]
+                for _, X in enumerate(batches):
+                    X, y = self.split_to_tensors(X)
+                    output = self.model(X)
+                    loss = self.criterion(output, y)
+                    running_loss += loss
+                    total_batches += 1
+                break
+        avg_loss = running_loss / total_batches
+        self.testing_loss = avg_loss.item()
 
     def create_dirs(self) -> None:
         """Create any necessary directories for the training script"""
@@ -198,7 +235,6 @@ class Trainer:
         """Dumps the model to disk."""
         output_name = str(self.chkpt_n) + "-" + desc + ".pt"
         output_path = self.specific_chkpt_dir / Path(output_name)
-        # output_path.mkdir(exist_ok=False)
         torch.save(
             {
                 "model_state_dict": self.model.state_dict(),
@@ -223,6 +259,7 @@ class Trainer:
         Returns:
             Loaded model and vocabulary
         """
+        # TODO: Fix the load logic
         checkpoint = torch.load(path, map_location=device)
 
         model = Word2VecModel(
