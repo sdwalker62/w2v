@@ -60,13 +60,6 @@ class Trainer:
         self.dd = dd
         if isinstance(self.dd, DatasetDict) or isinstance(self.dd, IterableDatasetDict):
             self.td = self.dd["train"]
-            # self.train_dl = DataLoader(
-            #     self.td.with_format("torch"),
-            #     num_workers=4,
-            #     batch_size=self.hyperparams.batch_size,
-            #     collate_fn=self._generate_pairs,
-            # )
-            print(self.td)
             self.vd = self.dd["validation"]
             self.testd = self.dd["test"]
 
@@ -82,14 +75,11 @@ class Trainer:
 
         self.create_dirs()
 
-    def pre_check(self):
+    def pre_check(self) -> None:
         """Performs pre-training actions to ensure functionality."""
         self.log.info(len(self.td))
         self.log.info(len(self.vd))
         self.log.info(len(self.testd))
-
-    def prepare_data(self, list) -> None:
-        """Collate data before the dataloader"""
 
     def start(self):
         """Training entrypoint."""
@@ -109,12 +99,6 @@ class Trainer:
         Returns:
             Trained model and word embeddings dictionary
         """
-        # Create dataset
-        # dataset = Word2VecDataset(
-        #     texts, self.window_size, self.min_count, self.is_skip_gram
-        # )
-
-        # dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
         # Initialize model
         vocab_size = self.tokenizer.get_vocab_size()
@@ -156,30 +140,17 @@ class Trainer:
                     total_loss += loss.item()
 
                     if (batch_idx + 1) % 100 == 0:
-                        print(
+                        self.log.info(
                             f"Epoch {epoch + 1}/{self.hyperparams.n_epochs}, "
                             f"Loss: {total_loss / (batch_idx + 1):.4f}"
                         )
 
-            print(
+            self.log.info(
                 f"Epoch {epoch + 1} completed, "
                 f"Average Loss: {total_loss / passed_samples:.4f}"
             )
-
-        # Save model if output path provided
-        if output_path:
-            output_path = Path(output_path)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(
-                {
-                    "model_state_dict": model.state_dict(),
-                    "vocab": dataset.vocab,
-                    "embedding_dim": self.embedding_dim,
-                    "is_skip_gram": self.is_skip_gram,
-                },
-                output_path,
-            )
-            print(f"Model saved to {output_path}")
+            self.checkpoint(f"epoch-{epoch}")
+            self.validate()
 
         # Create word embeddings dictionary
         embeddings = {
@@ -191,9 +162,11 @@ class Trainer:
 
     def validate(self):
         """Completes a single pass over the validation set."""
+        self.log.info("Running validation")
 
     def test(self):
         """Completes a single pass over the test set."""
+        self.log.info("Running tests")
 
     def create_dirs(self) -> None:
         """Create any necessary directories for the training script"""
@@ -207,7 +180,7 @@ class Trainer:
         if not self.specific_chkpt_dir.absolute().exists():
             self.specific_chkpt_dir.absolute().mkdir(exist_ok=False, parents=True)
 
-    def checkpoint(self, desc: str):
+    def checkpoint(self, desc: str) -> None:
         """Perform checkpointing duties."""
         # Create unique directory within the checkpoint directory
         assert self.chkpt_dir.exists(), self.log.error(
@@ -218,7 +191,7 @@ class Trainer:
 
         self.save_model(desc)
 
-    def save_model(self, desc: str):
+    def save_model(self, desc: str) -> None:
         """Dumps the model to disk."""
         output_name = self.chkpt_n + "-" + desc
         output_path = self.specific_chkpt_dir / Path(output_name)
