@@ -39,7 +39,7 @@ class HyperParams:
         loss_fn="ce",
         embed_dim=128,
         is_skipgram=False,
-        batch_size=16,
+        batch_size=1,
         window_size=4,
         iter_report=1_000,
         chkpt_iter=100_000,
@@ -70,9 +70,10 @@ class Trainer:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.hyperparams = hparams
         self.tokenizer = tokenizer
+        self.vocab = self.tokenizer.get_vocab()
         self.vocab_size = self.tokenizer.get_vocab_size()
         self.log.info(f"Vocab size: {self.vocab_size}")
-        self.model = Word2VecModel(
+        self.model = model(
             self.vocab_size,
             self.hyperparams.embed_dim,
             self.hyperparams.is_skipgram,
@@ -105,6 +106,7 @@ class Trainer:
         self.load_analogies()
         self.clean_analogies()
         self.transform_analogies()
+        self.display_config_table()
 
     def pre_check(self) -> None:
         """Performs pre-training actions to ensure functionality."""
@@ -157,10 +159,9 @@ class Trainer:
 
     def update_embedding_table(self) -> None:
         """Updates the embedding table."""
-        vocab = self.tokenizer.get_vocab()
         self.embeddings = {
             word: self.model.embedding.weight.data[idx].cpu()
-            for word, idx in vocab.items()
+            for word, idx in self.vocab.items()
         }
         self.embedding_history.append(self.embeddings)
 
@@ -184,10 +185,12 @@ class Trainer:
                 batches = self.prepare_batches(example)  # list[tuple[list[int], int]]
                 for batch_idx, X in enumerate(batches):
                     X, y = self.split_to_tensors(X)
+                    y = y.squeeze()
                     training_passes += 1
                     # Forward pass
                     self.optimizer.zero_grad()
                     output = self.model(X)
+                    output = output.squeeze()
                     loss = self.criterion(output, y)
 
                     # Backward pass
@@ -385,23 +388,23 @@ class Trainer:
             if len(context) == 0:
                 continue
 
+            center = word_indices[i]
+            pad_id = self.vocab["[PAD]"]
+
+            if word_indices[i] == pad_id:  # Skip padding
+                continue
+
+            # Pad context to fixed size
+            ctx_size = 2 * self.hyperparams.window_size
+            ctx_padded = context + [pad_id] * (ctx_size - len(context))
+            ctx_padded = ctx_padded[:ctx_size]
+
             if self.hyperparams.is_skipgram:
                 # Skip-gram: predict context words from center word
-                center = word_indices[i]
-                for ctx in context:
-                    if ctx != 0:  # Skip padding
-                        pairs.append((center, ctx))
+                pairs.append((center, ctx_padded))
             else:
                 # CBOW: predict center word from context words
-                if word_indices[i] == 0:  # Skip padding
-                    continue
-
-                # Pad context to fixed size
-                ctx_size = 2 * self.hyperparams.window_size
-                ctx_padded = context + [0] * (ctx_size - len(context))
-                ctx_padded = ctx_padded[:ctx_size]
-
-                pairs.append((ctx_padded, word_indices[i]))
+                pairs.append((ctx_padded, center))
 
         # Create batches
         pairs = [
@@ -425,7 +428,10 @@ class Trainer:
                                             second tensor contains stacked integers
         """
         # Unzip the tuples into two separate lists
-        lists, values = zip(*data)
+        if self.hyperparams.is_skipgram:
+            values, lists = zip(*data)
+        else:
+            lists, values = zip(*data)
 
         # Convert lists to tensor - needs to be padded if different lengths
         max_len = max(len(lst) for lst in lists)
@@ -435,6 +441,8 @@ class Trainer:
         # Convert values to tensor
         values_tensor = torch.tensor(values)
 
+        if self.hyperparams.is_skipgram:
+            return values_tensor.to(self.device), lists_tensor.to(self.device)
         return lists_tensor.to(self.device), values_tensor.to(self.device)
 
     def load_analogies(self) -> None:

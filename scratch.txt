@@ -1,0 +1,17 @@
+The fox jumps over the fence.
+
+window_size = 2
+
+words -> ints
+
+# CBOW Model
+    - trains faster (measure in hours)
+    - better syntactically
+(the, fox, over, the) -> jumps
+(5, 1, 123, 5) -> 7
+
+# Skipgram Model
+    - train slower (measure in days)
+    - better semantically
+jumps -> (the, fox, jumps, over)
+7 -> (5, 1, 123, 5)

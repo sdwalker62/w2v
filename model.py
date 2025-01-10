@@ -1,13 +1,14 @@
 """W2V models for both CBOW and Skipgram"""
 
-from torch import nn
 import torch
+import torch.nn.functional as F
+from torch import nn
 
 
 class Word2VecModel(nn.Module):
     def __init__(self, vocab_size: int, embedding_dim: int, is_skip_gram: bool = True):
         """
-        Word2Vec model implementation in PyTorch
+        Word2Vec model
 
         Args:
             vocab_size: Size of vocabulary
@@ -48,8 +49,9 @@ class Word2VecModel(nn.Module):
             Output logits of shape (batch_size, vocab_size)
         """
         if self.is_skip_gram:
-            embeds = self.embedding(x).squeeze(1)
+            x = self.embedding(x).squeeze(1)
+            x = F.relu(x)
         else:
-            embeds = self.embedding(x).mean(dim=1)
+            x = self.embedding(x).mean(dim=1)
 
-        return self.output(embeds)
+        return self.output(x)
