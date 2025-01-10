@@ -123,26 +123,26 @@ class Trainer:
         """Training entrypoint."""
         self.log.info("Training started")
         self.pre_check()
-        self.train_epoch()
+        self.train()
 
     def debug_boundary(self, idx: int) -> None:
-        """Stop iteration for debugging."""
+        """Stop iteration for debugging.
+
+        Parameters
+        ----------
+        idx : int
+            Checked index for stop condition
+
+        Returns
+        -------
+        None
+        """
         if self.debug_mode and idx == self.debug_iter:
             return True
         return False
 
-    def train_epoch(self) -> None:
-        """
-        Train Word2Vec model
-
-        Args:
-            texts: List of tokenized texts
-            output_path: Optional path to save trained model
-            device: Device to train on ('cuda' or 'cpu')
-
-        Returns:
-            Trained model and word embeddings dictionary
-        """
+    def train(self) -> None:
+        """Training loop logic."""
         print("\n")
         # Training loop
         training_passes = 0
@@ -257,7 +257,13 @@ class Trainer:
             self.specific_chkpt_dir.absolute().mkdir(exist_ok=False, parents=True)
 
     def checkpoint(self, desc: str) -> None:
-        """Perform checkpointing duties."""
+        """Perform checkpointing duties.
+
+        Parameters
+        ----------
+        desc : str
+            Description to be added as a suffix to the save file
+        """
         # Create unique directory within the checkpoint directory
         assert self.chkpt_dir.exists(), self.log.error(
             f"Cannot find checkpoint directory: {self.chkpt_dir}"
@@ -268,7 +274,13 @@ class Trainer:
         self.save_model(desc)
 
     def save_model(self, desc: str) -> None:
-        """Dumps the model to disk."""
+        """Dumps the model to disk.
+
+        Parameters
+        ----------
+        desc : str
+            Description to be added as a suffix to the save file
+        """
         output_name = str(self.chkpt_n) + "-" + desc + ".pt"
         output_path = self.specific_chkpt_dir / Path(output_name)
         torch.save(
@@ -283,32 +295,46 @@ class Trainer:
         self.log.info(f"Model saved to {output_path}")
 
     def load_model(
-        self, path: str, device: str = "cuda" if torch.cuda.is_available() else "cpu"
+        self,
+        path: str,
     ) -> tuple[Word2VecModel, dict[str, int]]:
-        """
-        Load saved model
+        """Load the model from disk, includes extras such as the tokenizer.
 
-        Args:
-            path: Path to saved model
-            device: Device to load model on
+        Parameters
+        ----------
+        path : str
+            Path to the directory containing the `*.pt` file
 
-        Returns:
-            Loaded model and vocabulary
+        Returns
+        -------
+        Word2VecModel
+            The PyTorch `module` object
         """
         # TODO: Fix the load logic
-        checkpoint = torch.load(path, map_location=device)
+        checkpoint = torch.load(path, map_location=self.device)
 
         model = Word2VecModel(
             len(checkpoint["vocab"]),
             checkpoint["embedding_dim"],
             checkpoint["is_skip_gram"],
-        ).to(device)
+        ).to(self.device)
 
         model.load_state_dict(checkpoint["model_state_dict"])
-        return model, checkpoint["vocab"]
+        return model
 
     def prepare_batches(self, row_dict) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Generate input-target pairs for training"""
+        """Generate input-target pairs for training.
+
+        Parameters
+        ----------
+        row_dict : dict
+            A dictionary of columns from a single row of the training table
+
+        Returns
+        -------
+        list[tuple[torch.Tensor, torch.Tensor]]
+            Returns a list of tuples of the form [(X1, y1), (X2, y2)]
+        """
         pairs = []
         # word_indices = [self.vocab.get(word, 0) for word in text]
         word_indices = list(row_dict["ids"])
