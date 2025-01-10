@@ -1,7 +1,9 @@
 """Main training logic. Does not concern itself with data manipulation."""
 
 import json
+import pickle
 import re
+import statistics
 from datetime import datetime
 from logging import Logger
 from pathlib import Path
@@ -92,6 +94,10 @@ class Trainer:
         self.testing_loss = 0.0
         self.phrases_txt, self.phrases_list = None, None
         self.words_txt, self.words_list = None, None
+        self.validation_analogy_results = []
+        self.test_analogy_results = None
+        self.embedding_history = []
+        self.embeddings = None
         self.debug_mode = True
         self.debug_iter = 10
         # init functions
@@ -117,6 +123,9 @@ class Trainer:
             "training_losses": self.training_losses,
             "validation_losses": self.validation_losses,
             "test_loss": self.testing_loss,
+            "mean_analogy_norm": self.test_analogy_results[0],
+            "median_analogy_norm": self.test_analogy_results[1],
+            "std_analogy_norm": self.test_analogy_results[2],
         }
         self.log.info(
             f"Saving training statistics at {str(self.specific_chkpt_dir)}/training_stats.json"
@@ -145,6 +154,15 @@ class Trainer:
         if self.debug_mode and idx == self.debug_iter:
             return True
         return False
+
+    def update_embedding_table(self) -> None:
+        """Updates the embedding table."""
+        vocab = self.tokenizer.get_vocab()
+        self.embeddings = {
+            word: self.model.embedding.weight.data[idx].cpu()
+            for word, idx in vocab.items()
+        }
+        self.embedding_history.append(self.embeddings)
 
     def train(self) -> None:
         """Training loop logic."""
@@ -224,6 +242,8 @@ class Trainer:
         avg_loss = running_loss / total_batches
         self.validation_losses.append(avg_loss.item())
 
+        self.test_model_on_analogies()
+
     def test(self):
         """Completes a single pass over the test set."""
         print("\n")
@@ -248,6 +268,8 @@ class Trainer:
                     break
         avg_loss = running_loss / total_batches
         self.testing_loss = avg_loss.item()
+
+        self.test_model_on_analogies(False)
 
     def create_dirs(self) -> None:
         """Create any necessary directories for the training script"""
@@ -277,6 +299,17 @@ class Trainer:
         self.log.info(f"Performing checkpoint: {self.chkpt_n}")
 
         self.save_model(desc)
+
+        # Grab new embeddings
+        self.update_embedding_table()
+        embedding_save_path = str(self.specific_chkpt_dir) + "/embedding_history.pkl"
+        with open(embedding_save_path, "wb") as f:
+            pickle.dump(self.embedding_history, f)
+
+        # Save analogy results
+        analogy_save_path = str(self.specific_chkpt_dir) + "/analogy_history.pkl"
+        with open(analogy_save_path, "wb") as f:
+            pickle.dump(self.validation_analogy_results, f)
 
     def save_model(self, desc: str) -> None:
         """Dumps the model to disk.
@@ -445,6 +478,48 @@ class Trainer:
         """Transform the analogy list to a form useful for processing."""
         self.phrases_list = [(*s.split(" "),) for s in self.phrases_txt]
         self.words_list = [(*s.split(" "),) for s in self.words_txt]
+
+    def test_model_on_analogies(self, validation_mode: bool = True) -> None:
+        """Run analogy tests"""
+        self.log.info("Processing analogies")
+
+        # Grab new embeddings
+        self.update_embedding_table()
+
+        # phrases tests
+        norms = []
+        for _list in [self.phrases_list, self.words_list]:
+            for p in _list:
+                # p := (word1, word2, word3, word4)
+                embeddings = []
+                encodings = self.tokenizer.encode_batch(p)
+                for e in encodings:
+                    # e := Encoding Object (contains ids, tokens, etc.)
+                    aggregate_emb = torch.zeros(self.hyperparams.embed_dim)
+                    for sub_token in e.tokens:
+                        if sub_token in self.embeddings.keys():
+                            emb = self.embeddings[sub_token]
+                        else:
+                            emb = self.embeddings["[UNK]"]
+                        aggregate_emb += emb
+                        aggregate_emb /= len(e.tokens)
+                    embeddings.append(aggregate_emb)
+
+                first_diff = embeddings[0] - embeddings[1]
+                second_diff = embeddings[2] - embeddings[3]
+                diff = first_diff - second_diff
+                norm = diff.norm()
+                norms.append(norm.item())
+
+        mean = statistics.mean(norms)
+        median = statistics.median(norms)
+        stdev = statistics.stdev(norms)
+
+        results = (mean, median, stdev)
+        if validation_mode:
+            self.validation_analogy_results.append(results)
+        else:
+            self.test_analogy_results = results
 
     def display_config_table(self) -> None:
         """Display a nicely formatted table of the hyperparameters."""
