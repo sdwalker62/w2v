@@ -133,7 +133,7 @@ class Trainer:
             f"Saving training statistics at {str(self.specific_chkpt_dir)}/training_stats.json"
         )
         with open(self.specific_chkpt_dir / "training_stats.json", "w") as f:
-            json.dump(training_stats, f)
+            json.dump(training_stats, f) # noqa
 
     def start(self) -> None:
         """Training entrypoint."""
@@ -141,7 +141,7 @@ class Trainer:
         self.pre_check()
         self.train()
 
-    def debug_boundary(self, idx: int) -> None:
+    def debug_boundary(self, idx: int) -> bool:
         """Stop iteration for debugging.
 
         Parameters
@@ -183,15 +183,15 @@ class Trainer:
             for example_idx, example in enumerate(self.td):
                 """Each example is a dictionary with features such as ids, text, etc."""
                 batches = self.prepare_batches(example)  # list[tuple[list[int], int]]
-                for batch_idx, X in enumerate(batches):
-                    X, y = self.split_to_tensors(X)
-                    y = y.squeeze()
+                for batch_idx, x_batch in enumerate(batches):
+                    x_batch, y_true = self.split_to_tensors(x_batch)
+                    y_true = y_true.squeeze()
                     training_passes += 1
                     # Forward pass
                     self.optimizer.zero_grad()
-                    output = self.model(X)
+                    output = self.model(x_batch)
                     output = output.squeeze()
-                    loss = self.criterion(output, y)
+                    loss = self.criterion(output, y_true)
 
                     # Backward pass
                     loss.backward()
@@ -216,53 +216,31 @@ class Trainer:
                 f"Average Loss: {total_loss / training_passes:.4f}"
             )
             self.checkpoint(f"epoch-{epoch}")
-            self.validate()
+            self.test(validation=True)
         self.test()
         self.dump_stats()
 
-    def validate(self):
-        """Completes a single pass over the validation set."""
+
+    def test(self, validation: bool = False) -> None:
+        """Completes a single pass over the test/validation set."""
         print("\n")
-        self.log.info("Validating")
-        self.log.info("Setting model to evaluation mode and entering no_grad context")
+        if validation:
+            self.log.info("Running validation loop")
+            data = self.vd
+        else:
+            self.log.info("Running test loop")
+            data = self.testd
         self.model.eval()
         running_loss = 0.0
         total_batches = 0
         with torch.no_grad():
-            for example_idx, example in enumerate(self.vd):
+            for example_idx, example in enumerate(data):
                 """Each example is a dictionary with features such as ids, text, etc."""
                 batches = self.prepare_batches(example)  # list[tuple[list[int], int]]
-                for batch_idx, X in enumerate(batches):
-                    X, y = self.split_to_tensors(X)
-                    output = self.model(X)
-                    loss = self.criterion(output, y)
-                    running_loss += loss
-                    total_batches += 1
-                    if self.debug_boundary(batch_idx):
-                        break
-                if self.debug_boundary(example_idx):
-                    break
-        avg_loss = running_loss / total_batches
-        self.validation_losses.append(avg_loss.item())
-
-        self.test_model_on_analogies()
-
-    def test(self):
-        """Completes a single pass over the test set."""
-        print("\n")
-        self.log.info("Testing")
-        self.log.info("Setting model to evaluation mode and entering no_grad context")
-        self.model.eval()
-        running_loss = 0.0
-        total_batches = 0
-        with torch.no_grad():
-            for example_idx, example in enumerate(self.testd):
-                """Each example is a dictionary with features such as ids, text, etc."""
-                batches = self.prepare_batches(example)  # list[tuple[list[int], int]]
-                for batch_idx, X in enumerate(batches):
-                    X, y = self.split_to_tensors(X)
-                    output = self.model(X)
-                    loss = self.criterion(output, y)
+                for batch_idx, x_batch in enumerate(batches):
+                    x_batch, y_true = self.split_to_tensors(x_batch)
+                    output = self.model(x_batch)
+                    loss = self.criterion(output, y_true)
                     running_loss += loss
                     total_batches += 1
                     if self.debug_boundary(batch_idx):
@@ -307,12 +285,12 @@ class Trainer:
         self.update_embedding_table()
         embedding_save_path = str(self.specific_chkpt_dir) + "/embedding_history.pkl"
         with open(embedding_save_path, "wb") as f:
-            pickle.dump(self.embedding_history, f)
+            pickle.dump(self.embedding_history, f) # noqa
 
         # Save analogy results
         analogy_save_path = str(self.specific_chkpt_dir) + "/analogy_history.pkl"
         with open(analogy_save_path, "wb") as f:
-            pickle.dump(self.validation_analogy_results, f)
+            pickle.dump(self.validation_analogy_results, f) # noqa
 
     def save_model(self, desc: str) -> None:
         """Dumps the model to disk.
@@ -338,7 +316,7 @@ class Trainer:
     def load_model(
         self,
         path: str,
-    ) -> tuple[Word2VecModel, dict[str, int]]:
+    ) -> Word2VecModel:
         """Load the model from disk, includes extras such as the tokenizer.
 
         Parameters
@@ -363,7 +341,7 @@ class Trainer:
         model.load_state_dict(checkpoint["model_state_dict"])
         return model
 
-    def prepare_batches(self, row_dict) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    def prepare_batches(self, row_dict) -> list[list[tuple]]:
         """Generate input-target pairs for training.
 
         Parameters
@@ -415,7 +393,7 @@ class Trainer:
 
     def split_to_tensors(
         self,
-        data: list[tuple[list[int], int]],
+        data: list[tuple],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Convert a list[tuple[list[int], int]] into two PyTorch tensors.
