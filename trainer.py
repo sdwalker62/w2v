@@ -9,6 +9,7 @@ from logging import Logger
 from pathlib import Path
 from typing import TypeAlias
 
+import joblib
 import torch
 from datasets import Dataset, DatasetDict, IterableDataset, IterableDatasetDict
 from rich import box
@@ -38,8 +39,8 @@ class HyperParams:
         optimizer="adam",
         loss_fn="ce",
         embed_dim=128,
-        is_skipgram=False,
-        batch_size=1,
+        is_skipgram=True,
+        batch_size=16,
         window_size=4,
         iter_report=1_000,
         chkpt_iter=100_000,
@@ -133,7 +134,7 @@ class Trainer:
             f"Saving training statistics at {str(self.specific_chkpt_dir)}/training_stats.json"
         )
         with open(self.specific_chkpt_dir / "training_stats.json", "w") as f:
-            json.dump(training_stats, f) # noqa
+            json.dump(training_stats, f)  # noqa
 
     def start(self) -> None:
         """Training entrypoint."""
@@ -183,15 +184,13 @@ class Trainer:
             for example_idx, example in enumerate(self.td):
                 """Each example is a dictionary with features such as ids, text, etc."""
                 batches = self.prepare_batches(example)  # list[tuple[list[int], int]]
-                for batch_idx, x_batch in enumerate(batches):
-                    x_batch, y_true = self.split_to_tensors(x_batch)
-                    y_true = y_true.squeeze()
+                for batch_idx, _X in enumerate(batches):
+                    _X, _y = self.split_to_tensors(_X)
                     training_passes += 1
                     # Forward pass
                     self.optimizer.zero_grad()
-                    output = self.model(x_batch)
-                    output = output.squeeze()
-                    loss = self.criterion(output, y_true)
+                    output = self.model(_X)
+                    loss = self.criterion(output, _y)
 
                     # Backward pass
                     loss.backward()
@@ -219,7 +218,6 @@ class Trainer:
             self.test(validation=True)
         self.test()
         self.dump_stats()
-
 
     def test(self, validation: bool = False) -> None:
         """Completes a single pass over the test/validation set."""
@@ -283,14 +281,6 @@ class Trainer:
 
         # Grab new embeddings
         self.update_embedding_table()
-        embedding_save_path = str(self.specific_chkpt_dir) + "/embedding_history.pkl"
-        with open(embedding_save_path, "wb") as f:
-            pickle.dump(self.embedding_history, f) # noqa
-
-        # Save analogy results
-        analogy_save_path = str(self.specific_chkpt_dir) + "/analogy_history.pkl"
-        with open(analogy_save_path, "wb") as f:
-            pickle.dump(self.validation_analogy_results, f) # noqa
 
     def save_model(self, desc: str) -> None:
         """Dumps the model to disk.
@@ -306,6 +296,8 @@ class Trainer:
             {
                 "model_state_dict": self.model.state_dict(),
                 "tokenizer": self.tokenizer,
+                "embedding_history": self.embedding_history,
+                "validation_analogy_results": self.validation_analogy_results,
                 "embedding_dim": self.hyperparams.embed_dim,
                 "is_skip_gram": self.hyperparams.is_skipgram,
             },
@@ -369,18 +361,21 @@ class Trainer:
             center = word_indices[i]
             pad_id = self.vocab["[PAD]"]
 
-            if word_indices[i] == pad_id:  # Skip padding
-                continue
-
-            # Pad context to fixed size
-            ctx_size = 2 * self.hyperparams.window_size
-            ctx_padded = context + [pad_id] * (ctx_size - len(context))
-            ctx_padded = ctx_padded[:ctx_size]
-
+            # Skipgram
             if self.hyperparams.is_skipgram:
                 # Skip-gram: predict context words from center word
-                pairs.append((center, ctx_padded))
+                for ctx in context:
+                    if ctx != pad_id:  # Skip padding
+                        pairs.append(([center], ctx))
+            # CBOW
             else:
+                if word_indices[i] == pad_id:  # Skip padding
+                    continue
+
+                # Pad context to fixed size
+                ctx_size = 2 * self.hyperparams.window_size
+                ctx_padded = context + [pad_id] * (ctx_size - len(context))
+                ctx_padded = ctx_padded[:ctx_size]
                 # CBOW: predict center word from context words
                 pairs.append((ctx_padded, center))
 
@@ -406,10 +401,7 @@ class Trainer:
                                             second tensor contains stacked integers
         """
         # Unzip the tuples into two separate lists
-        if self.hyperparams.is_skipgram:
-            values, lists = zip(*data)
-        else:
-            lists, values = zip(*data)
+        lists, values = zip(*data)
 
         # Convert lists to tensor - needs to be padded if different lengths
         max_len = max(len(lst) for lst in lists)
@@ -419,8 +411,6 @@ class Trainer:
         # Convert values to tensor
         values_tensor = torch.tensor(values)
 
-        if self.hyperparams.is_skipgram:
-            return values_tensor.to(self.device), lists_tensor.to(self.device)
         return lists_tensor.to(self.device), values_tensor.to(self.device)
 
     def load_analogies(self) -> None:
