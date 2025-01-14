@@ -1,7 +1,6 @@
 """Main training logic. Does not concern itself with data manipulation."""
 
 import json
-import pickle
 import re
 import statistics
 from datetime import datetime
@@ -9,7 +8,6 @@ from logging import Logger
 from pathlib import Path
 from typing import TypeAlias
 
-import joblib
 import torch
 from datasets import Dataset, DatasetDict, IterableDataset, IterableDatasetDict
 from rich import box
@@ -17,7 +15,7 @@ from rich.console import Console
 from rich.table import Table
 from tokenizers import Tokenizer
 from torch import nn, optim
-from torch.nn import Module
+import matplotlib.pyplot as plt
 
 from model import Word2VecModel
 
@@ -25,7 +23,6 @@ dataset: TypeAlias = Dataset | DatasetDict | IterableDataset | IterableDatasetDi
 
 # TODO: Add wandb integration
 # TODO: Add graphs to checkpoint dir
-# TODO: Finish skipgram
 # TODO: Add load model
 # TODO: Auto determine best checkpoint from testing loss
 # TODO: Finish rich table
@@ -39,7 +36,7 @@ class HyperParams:
         optimizer="adam",
         loss_fn="ce",
         embed_dim=128,
-        is_skipgram=True,
+        is_skipgram=False,
         batch_size=16,
         window_size=4,
         iter_report=1_000,
@@ -61,7 +58,7 @@ class Trainer:
     def __init__(
         self,
         dd: dataset,
-        model: Module,
+        model: Word2VecModel,
         hparams: HyperParams,
         tokenizer: Tokenizer | None,
         logger: Logger,

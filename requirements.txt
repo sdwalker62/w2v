@@ -6,3 +6,4 @@ wandb
 rich
 joblib
 black
+matplotlib
